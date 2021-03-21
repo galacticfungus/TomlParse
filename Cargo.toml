@@ -1,5 +1,5 @@
 [package]
-name = "TomlParse"
+name = "tomlparse"
 version = "0.1.0"
 authors = ["Luke Oliver <galactic.fungus@gmail.com>"]
 edition = "2018"
