@@ -53,7 +53,7 @@ mod test_parser {
     fn test_string_parse() {
         let toml_string = "junk = \"caveman\"";
         let mut parser = super::Parser::new();
-        let pair = parser.read_pair(toml_string).unwrap();
+        let pair = parser.read_test_pair(toml_string).unwrap();
         assert_eq!(
             pair,
             Some(TomlPair::new("junk", TomlValue::String("caveman")))
@@ -64,7 +64,7 @@ mod test_parser {
     fn test_string_parse2() {
         let toml_string = "junk = \"caveman\" ";
         let mut parser = super::Parser::new();
-        let pair = parser.read_pair(toml_string).unwrap();
+        let pair = parser.read_test_pair(toml_string).unwrap();
         assert_eq!(
             pair,
             Some(TomlPair::new("junk", TomlValue::String("caveman")))
@@ -76,24 +76,24 @@ mod test_parser {
     fn test_string_parse3() {
         let toml_string = "junk = \"caveman\"\n";
         let mut parser = super::Parser::new();
-        let pair = parser.read_pair(toml_string).unwrap();
+        let pair = parser.read_test_pair(toml_string).unwrap();
         assert_eq!(
             pair,
             Some(TomlPair::new("junk", TomlValue::String("caveman")))
         );
-        let second_pair = parser.read_pair(toml_string).unwrap();
+        let second_pair = parser.read_test_pair(toml_string).unwrap();
         assert_eq!(second_pair, None);
     }
     #[test]
     fn test_multiline_string_parse() {
         let toml_string = "junk = \"caveman\"\naggro = \"fred\"";
         let mut parser = super::Parser::new();
-        let pair = parser.read_pair(toml_string).unwrap();
+        let pair = parser.read_test_pair(toml_string).unwrap();
         assert_eq!(
             pair,
             Some(TomlPair::new("junk", TomlValue::String("caveman")))
         );
-        let second_pair = parser.read_pair(toml_string).unwrap();
+        let second_pair = parser.read_test_pair(toml_string).unwrap();
         assert_eq!(
             second_pair,
             Some(TomlPair::new("aggro", TomlValue::String("fred")))
@@ -104,16 +104,27 @@ mod test_parser {
     fn test_multiline_string_parse2() {
         let toml_string = "junk = \"caveman\"\n\naggro = \"fred\"";
         let mut parser = super::Parser::new();
-        let pair = parser.read_pair(toml_string).unwrap();
+        let pair = parser.read_test_pair(toml_string).unwrap();
         assert_eq!(
             pair,
             Some(TomlPair::new("junk", TomlValue::String("caveman")))
         );
-        let second_pair = parser.read_pair(toml_string).unwrap();
+        let second_pair = parser.read_test_pair(toml_string).unwrap();
         assert_eq!(
             second_pair,
             Some(TomlPair::new("aggro", TomlValue::String("fred")))
         );
-        assert_eq!(parser.read_pair(toml_string).unwrap(), None);
+        assert_eq!(parser.read_test_pair(toml_string).unwrap(), None);
+    }
+
+    #[test]
+    fn test_reading_integer() {
+        let toml_string = "junk = 1234";
+        let mut parser = super::Parser::new();
+        let pair = parser.read_test_pair(toml_string).unwrap();
+        assert_eq!(
+            pair,
+            Some(TomlPair::new("junk", TomlValue::Integer(1234)))
+        );
     }
 }

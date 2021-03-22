@@ -21,7 +21,7 @@ impl Parser {
         }
     }
 
-    pub fn set_name_start(&mut self, name_start: usize) {
+    fn set_name_start(&mut self, name_start: usize) {
         debug_assert!(
             self.name_start.is_none(),
             "ASSERT FAILED: Incorrect usage of set name start - name start can only be set once"
@@ -29,7 +29,7 @@ impl Parser {
         self.name_start = Some(name_start);
     }
 
-    pub fn set_name_end(&mut self, name_end: usize) {
+    fn set_name_end(&mut self, name_end: usize) {
         debug_assert!(
             self.name_end.is_none(),
             "ASSERT FAILED: Incorrect usage of set name end - name end can only be set once"
@@ -37,7 +37,7 @@ impl Parser {
         self.name_end = Some(name_end);
     }
 
-    pub fn set_value_start(&mut self, value_start: usize) {
+    fn set_value_start(&mut self, value_start: usize) {
         debug_assert!(
             self.value_start.is_none(),
             "ASSERT FAILED: Incorrect usage of set value start - value start can only be set once"
@@ -45,7 +45,7 @@ impl Parser {
         self.value_start = Some(value_start);
     }
 
-    pub fn set_value_end(&mut self, value_end: usize) {
+    fn set_value_end(&mut self, value_end: usize) {
         debug_assert!(
             self.value_end.is_none(),
             "ASSERT FAILED: Incorrect usage of set value end - value end can only be set once"
@@ -53,7 +53,7 @@ impl Parser {
         self.value_end = Some(value_end);
     }
 
-    pub fn name_start(&mut self) -> usize {
+    fn name_start(&mut self) -> usize {
         debug_assert!(
             self.name_start.is_some(),
             "ASSERT FAILED: Retrieving name start index before it has been set"
@@ -61,7 +61,7 @@ impl Parser {
         replace(&mut self.name_start, None).unwrap()
     }
 
-    pub fn name_end(&mut self) -> usize {
+    fn name_end(&mut self) -> usize {
         debug_assert!(
             self.name_end.is_some(),
             "ASSERT FAILED: Retrieving name end index before it has been set"
@@ -69,7 +69,7 @@ impl Parser {
         replace(&mut self.name_end, None).unwrap()
     }
 
-    pub fn value_end(&mut self) -> usize {
+    fn value_end(&mut self) -> usize {
         debug_assert!(
             self.value_end.is_some(),
             "ASSERT FAILED: Retrieving value end index before it has been set"
@@ -77,7 +77,7 @@ impl Parser {
         replace(&mut self.value_end, None).unwrap()
     }
 
-    pub fn value_start(&mut self) -> usize {
+    fn value_start(&mut self) -> usize {
         debug_assert!(
             self.value_start.is_some(),
             "ASSERT FAILED: Retrieving value start index before it has been set"
@@ -90,13 +90,25 @@ impl Parser {
         &mut self,
         data_to_parse: &'a str,
     ) -> Result<HashMap<&'a str, TomlValue<'a>>, error::Error> {
+        let mut hs = HashMap::new();
         while let Some(pair) = self.read_pair(data_to_parse)? {
             // Add it to the hashmap
+            hs.insert(pair.name, pair.value);
         }
-        Ok(HashMap::new())
+        Ok(hs)
     }
 
-    pub fn read_pair<'a>(
+    /// Wrapper around read_pair that is used in testing
+    #[cfg(test)]
+    pub(crate) fn read_test_pair<'a>(
+        &mut self,
+        data_to_parse: &'a str,
+    ) -> Result<Option<TomlPair<'a>>, error::Error> {
+        let pair = self.read_pair(data_to_parse)?;
+        Ok(pair)
+    }
+
+    fn read_pair<'a>(
         &mut self,
         data_to_parse: &'a str,
     ) -> Result<Option<TomlPair<'a>>, error::Error> {
@@ -254,6 +266,7 @@ impl Parser {
                 },
                 None => {
                     // File ended after a name but before a =
+                    return Err(Error::new(ErrorKind::MissingValue(self.line_number), None));
                 }
             }
         }
@@ -277,9 +290,10 @@ impl Parser {
                     }
                     char if char.is_ascii_digit() == true => {
                         // Not true we could be reading a float
+                        println!("Reading integer");
                         self.state = ParserState::ReadingInteger;
                         // *value_starts = index + self.position + 1;
-                        self.set_value_start(index + self.position + 1);
+                        self.set_value_start(index + self.position);
                         return Ok(());
                     }
                     // TODO: Support for multiline strings etc
@@ -351,8 +365,8 @@ impl Parser {
                 },
                 None => {
                     // File ended while reading an integer, this is valid the end of the file denotes the end of the integer
-                    // TODO: We need the length of the buffer to set an appropriate end position
                     self.set_value_end(data_to_parse.len());
+                    self.state = ParserState::PairDone;
                     return Ok(());
                 }
             }
@@ -448,9 +462,24 @@ impl Parser {
                     self.position = data_to_parse.len();
                     let value = &data_to_parse[self.value_start()..self.value_end()];
                     let name = &data_to_parse[self.name_start()..self.name_end()];
-                    // let value = &self.buffer[value_starts..value_ends];
-                    // let name = &self.buffer[name_starts..name_ends];
-                    return Ok(TomlPair::new(name, TomlValue::String(value)));
+                    match self.value_type {
+                        ValueType::Integer => {
+                            let integer = match u64::from_str_radix(value, 10) {
+                                Ok(integer) => integer,
+                                Err(error) => {
+                                    return Err(Error::new(
+                                        ErrorKind::InvalidValue(self.line_number),
+                                        Some(Box::new(error)),
+                                    ))
+                                }
+                            };
+                            return Ok(TomlPair::new(name, TomlValue::Integer(integer)));
+                        }
+                        ValueType::String => {
+                            return Ok(TomlPair::new(name, TomlValue::String(value)))
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
