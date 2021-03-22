@@ -4,7 +4,7 @@ use error::ErrorKind;
 
 use super::{
     error::{self, Error},
-    Parser, ParserState, TomlPair, TomlValue, ValueType,
+    Parser, ParserState, TomlPair, TomlValue,
 };
 
 impl Parser {
@@ -17,7 +17,6 @@ impl Parser {
             name_end: None,
             value_end: None,
             value_start: None,
-            value_type: ValueType::Unknown,
         }
     }
 
@@ -124,15 +123,23 @@ impl Parser {
 
         let mut sequence = data_to_parse[self.position..].chars().enumerate();
         println!(
-            "Remaining string to parse is \"{}\"",
+            "Remaining string to parse is {}",
+            &data_to_parse[self.position..]
+        );
+
+        println!(
+            "Pointing at character {:?}",
             &data_to_parse[self.position..]
         );
 
         loop {
             match self.state {
                 ParserState::NewLine => {
-                    // Returns none otherwise continues
-                    self.process_new_line_state(&mut sequence)?;
+                    // Returns none if we are at the end of the buffer otherwise continues
+                    if let None = self.process_new_line_state(&mut sequence)? {
+                        // After encountering a new line we reached the eof
+                        return Ok(None);
+                    }
                 }
                 ParserState::ReadingName => {
                     self.process_reading_name_state(&mut sequence)?;
@@ -145,20 +152,68 @@ impl Parser {
                 }
                 ParserState::ReadingInteger => {
                     // This state can move to ReadingFloat anytime we see a .
-                    self.process_read_integer_state(&mut sequence, data_to_parse)?;
+                    let value = self.process_read_integer_state(&mut sequence, data_to_parse)?;
+                    return Ok(Some(value));
                 }
                 ParserState::ReadingString => {
-                    self.process_read_string_state(&mut sequence)?;
+                    let string_value =
+                        self.process_read_string_state(&mut sequence, data_to_parse)?;
+                    return Ok(Some(string_value));
                 }
-                ParserState::PairDone => {
-                    // Index becomes the new position
-                    return Ok(Some(
-                        self.process_pair_done_state(&mut sequence, data_to_parse)?,
-                    ));
+                ParserState::AfterValue => {
+                    if let None = self.process_after_value_state(&mut sequence)? {
+                        // After finishing a value we encountered a eof
+                        return Ok(None);
+                    }
+                }
+                ParserState::ReadingBoolean => unimplemented!("No support for booleans"),
+            }
+        }
+    }
+    fn process_after_value_state(
+        &mut self,
+        sequence: &mut std::iter::Enumerate<std::str::Chars>,
+    ) -> Result<Option<()>, error::Error> {
+        loop {
+            match sequence.next() {
+                Some((_, char)) => match char {
+                    ' ' | '\t' => {
+                        println!("Whitespace after a value");
+                    }
+                    '\n' => {
+                        // Whitespace - Move to NewLine state
+                        self.line_number += 1;
+                        self.state = ParserState::NewLine;
+                        return Ok(Some(()));
+                    }
+                    '\r' => {
+                        // Next character must be \n and then return pair
+                        if let Some((_, '\n')) = sequence.next() {
+                            // No Op continue looking for the start of a name
+                            self.line_number += 1;
+                            self.state = ParserState::NewLine;
+                            return Ok(Some(()));
+                        } else {
+                            return Err(error::Error::new(
+                                ErrorKind::InvalidEndOfLine(self.line_number),
+                                None,
+                            ));
+                        }
+                    }
+                    _ => {
+                        // Error invalid value - started a new value or name on the same line as a completed name/value
+                        return Err(Error::new(ErrorKind::InvalidValue(self.line_number), None));
+                    }
+                },
+                None => {
+                    // File ended with a new line
+                    println!("File ended with a new line");
+                    return Ok(None);
                 }
             }
         }
     }
+
     // Processes the state after reading a pair, returns Some(()) if a name was found otherwise returns none
     fn process_new_line_state(
         &mut self,
@@ -311,12 +366,11 @@ impl Parser {
         }
     }
 
-    fn process_read_integer_state(
+    fn process_read_integer_state<'a>(
         &mut self,
         sequence: &mut std::iter::Enumerate<std::str::Chars>,
-        data_to_parse: &str,
-    ) -> Result<(), Error> {
-        self.value_type = ValueType::Integer;
+        data_to_parse: &'a str,
+    ) -> Result<TomlPair<'a>, Error> {
         loop {
             match sequence.next() {
                 Some((index, char)) => match char {
@@ -325,9 +379,13 @@ impl Parser {
                     }
                     ' ' | '\t' => {
                         // Whitespace means the integer ended.
-                        self.state = ParserState::PairDone;
+                        // This means we are still looking for a new line but the integer is done
+                        self.state = ParserState::AfterValue;
                         self.set_value_end(index + self.position);
-                        return Ok(());
+                        self.position += index;
+                        // Moving to AfterValue state
+                        self.state = ParserState::AfterValue;
+                        return Ok(self.build_integer_pair(data_to_parse)?);
                     }
                     '.' => {
                         unimplemented!("No support for floats");
@@ -335,19 +393,21 @@ impl Parser {
                     }
                     '\n' => {
                         // End of integer
-                        self.state = ParserState::PairDone;
+                        self.state = ParserState::NewLine;
                         self.line_number += 1;
                         self.set_value_end(index + self.position);
-                        //return integer
-                        return Ok(());
+                        self.position += index;
+                        return Ok(self.build_integer_pair(data_to_parse)?);
                     }
                     '\r' => {
                         // Next character must be \n and then return pair
                         if let Some((index, '\n')) = sequence.next() {
-                            self.state = ParserState::PairDone;
+                            self.state = ParserState::NewLine;
                             self.line_number += 1;
                             self.set_value_end(index + self.position + 1);
-                            return Ok(());
+                            self.position += index + 1;
+                            return Ok(self.build_integer_pair(data_to_parse)?);
+                            // Integer is done and we are moving to NewLine state
                         } else {
                             // Error - invalid integer because of invalid end of line
                             return Err(Error::new(
@@ -364,18 +424,18 @@ impl Parser {
                 None => {
                     // File ended while reading an integer, this is valid the end of the file denotes the end of the integer
                     self.set_value_end(data_to_parse.len());
-                    self.state = ParserState::PairDone;
-                    return Ok(());
+                    self.state = ParserState::NewLine;
+                    return Ok(self.build_integer_pair(data_to_parse)?);
                 }
             }
         }
     }
 
-    fn process_read_string_state(
+    fn process_read_string_state<'a>(
         &mut self,
         sequence: &mut std::iter::Enumerate<std::str::Chars>,
-    ) -> Result<(), Error> {
-        self.value_type = ValueType::String;
+        data_to_parse: &'a str,
+    ) -> Result<TomlPair<'a>, Error> {
         loop {
             match sequence.next() {
                 Some((index, char)) => match char {
@@ -383,10 +443,12 @@ impl Parser {
                         // End of the string
                         // We are now scanning for the end of line
                         println!("Found end of string at {}", index);
-                        self.state = ParserState::PairDone;
+                        self.state = ParserState::AfterValue;
                         self.set_value_end(index + self.position);
                         // *value_ends = index + self.position;
-                        return Ok(());
+                        self.position += index + 1;
+                        self.state = ParserState::AfterValue;
+                        return Ok(self.build_string_pair(data_to_parse)?);
                     }
                     '\n' => {
                         // End of line without ending the string - this is invalid to read but not to produce
@@ -408,78 +470,144 @@ impl Parser {
         }
     }
 
-    fn process_pair_done_state<'a>(
-        &mut self,
-        sequence: &mut std::iter::Enumerate<std::str::Chars>,
-        data_to_parse: &'a str,
-    ) -> Result<TomlPair<'a>, Error> {
-        loop {
-            match sequence.next() {
-                Some((index, char)) => match char {
-                    ' ' | '\t' => {
+    // fn process_pair_done_state<'a>(
+    //     &mut self,
+    //     sequence: &mut std::iter::Enumerate<std::str::Chars>,
+    //     data_to_parse: &'a str,
+    // ) -> Result<TomlPair<'a>, Error> {
+    //     loop {
+    //         match self.value_type {
+    //             ValueType::Integer => {
+    //                 // At this point we already have the value
+    //             }
+    //             _ => {
 
-                        // No Op we are just looking for a new line or eof at this point
-                    }
-                    '\n' => {
-                        println!("Found start of next pair at {}", index);
-                        self.state = ParserState::NewLine;
-                        let value = &data_to_parse[self.value_start()..self.value_end()];
-                        let name = &data_to_parse[self.name_start()..self.name_end()];
-                        self.line_number += 1;
-                        self.position += index;
-                        match self.value_type {
-                            ValueType::Integer => {
-                                let integer = match u64::from_str_radix(value, 10) {
-                                    Ok(integer) => integer,
-                                    Err(error) => {
-                                        return Err(Error::new(
-                                            ErrorKind::InvalidValue(self.line_number),
-                                            Some(Box::new(error)),
-                                        ))
-                                    }
-                                };
-                                return Ok(TomlPair::new(name, TomlValue::Integer(integer)));
-                            }
-                            ValueType::String => {
-                                return Ok(TomlPair::new(name, TomlValue::String(value)))
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {
-                        println!("Random character after pair read - invalid ? {}", char);
-                        return Err(Error::new(ErrorKind::InvalidValue(self.line_number), None));
-                        // TODO: Return error
-                    }
-                },
-                None => {
-                    // Pair completed and we reached the end of the file
-                    println!("File completed after reading a pair");
-                    // Ensure that we point to the end of the buffer
-                    self.state = ParserState::NewLine;
-                    self.position = data_to_parse.len();
-                    let value = &data_to_parse[self.value_start()..self.value_end()];
-                    let name = &data_to_parse[self.name_start()..self.name_end()];
-                    match self.value_type {
-                        ValueType::Integer => {
-                            let integer = match u64::from_str_radix(value, 10) {
-                                Ok(integer) => integer,
-                                Err(error) => {
-                                    return Err(Error::new(
-                                        ErrorKind::InvalidValue(self.line_number),
-                                        Some(Box::new(error)),
-                                    ))
-                                }
-                            };
-                            return Ok(TomlPair::new(name, TomlValue::Integer(integer)));
-                        }
-                        ValueType::String => {
-                            return Ok(TomlPair::new(name, TomlValue::String(value)))
-                        }
-                        _ => {}
-                    }
-                }
+    //             }
+    //         }
+    //         match sequence.next() {
+    //             Some((index, char)) => match char {
+    //                 ' ' | '\t' => {
+
+    //                     // No Op we are just looking for a new line or eof at this point
+    //                 }
+    //                 '\n' => {
+    //                     println!("Found start of next pair at {}", index);
+    //                     self.state = ParserState::NewLine;
+    //                     let value = &data_to_parse[self.value_start()..self.value_end()];
+    //                     let name = &data_to_parse[self.name_start()..self.name_end()];
+    //                     self.line_number += 1;
+    //                     self.position += index;
+    //                     match self.value_type {
+    //                         ValueType::Integer => {
+    //                             let integer = match u64::from_str_radix(value, 10) {
+    //                                 Ok(integer) => integer,
+    //                                 Err(error) => {
+    //                                     return Err(Error::new(
+    //                                         ErrorKind::InvalidValue(self.line_number),
+    //                                         Some(Box::new(error)),
+    //                                     ))
+    //                                 }
+    //                             };
+    //                             return Ok(TomlPair::new(name, TomlValue::Integer(integer)));
+    //                         }
+    //                         ValueType::String => {
+    //                             return Ok(TomlPair::new(name, TomlValue::String(value)))
+    //                         }
+    //                         _ => {}
+    //                     }
+    //                 }
+    //                 '\r' => {
+    //                     println!("Partial new line");
+    //                     if let Some((index, '\n')) = sequence.next() {
+    //                         self.state = ParserState::PairDone;
+    //                         self.line_number += 1;
+    //                         self.set_value_end(index + self.position + 1);
+    //                         self.state = ParserState::NewLine;
+    //                         let value = &data_to_parse[self.value_start()..self.value_end()];
+    //                         let name = &data_to_parse[self.name_start()..self.name_end()];
+    //                         self.line_number += 1;
+    //                         self.position += index;
+    //                         match self.value_type {
+    //                             ValueType::Integer => {
+    //                                 let integer = match u64::from_str_radix(value, 10) {
+    //                                     Ok(integer) => integer,
+    //                                     Err(error) => {
+    //                                         return Err(Error::new(
+    //                                             ErrorKind::InvalidValue(self.line_number),
+    //                                             Some(Box::new(error)),
+    //                                         ))
+    //                                     }
+    //                                 };
+    //                                 return Ok(TomlPair::new(name, TomlValue::Integer(integer)));
+    //                             }
+    //                             ValueType::String => {
+    //                                 return Ok(TomlPair::new(name, TomlValue::String(value)))
+    //                             }
+    //                             _ => {}
+    //                         }
+    //                     } else {
+    //                         // Error - invalid integer because of invalid end of line
+    //                         return Err(Error::new(
+    //                             ErrorKind::InvalidEndOfLine(self.line_number),
+    //                             None,
+    //                         ));
+    //                     }
+    //                 }
+    //                 _ => {
+    //                     println!("Random character after pair read - invalid ? {}", char);
+    //                     return Err(Error::new(ErrorKind::InvalidValue(self.line_number), None));
+    //                     // TODO: Return error
+    //                 }
+    //             },
+    //             None => {
+    //                 // Pair completed and we reached the end of the file
+    //                 println!("File completed after reading a pair");
+    //                 // Ensure that we point to the end of the buffer
+    //                 self.state = ParserState::NewLine;
+    //                 self.position = data_to_parse.len();
+    //                 let value = &data_to_parse[self.value_start()..self.value_end()];
+    //                 let name = &data_to_parse[self.name_start()..self.name_end()];
+    //                 match self.value_type {
+    //                     ValueType::Integer => {
+    //                         let integer = match u64::from_str_radix(value, 10) {
+    //                             Ok(integer) => integer,
+    //                             Err(error) => {
+    //                                 return Err(Error::new(
+    //                                     ErrorKind::InvalidValue(self.line_number),
+    //                                     Some(Box::new(error)),
+    //                                 ))
+    //                             }
+    //                         };
+    //                         return Ok(TomlPair::new(name, TomlValue::Integer(integer)));
+    //                     }
+    //                     ValueType::String => {
+    //                         return Ok(TomlPair::new(name, TomlValue::String(value)))
+    //                     }
+    //                     _ => {}
+    //                 }
+    //                 self.value_type = ValueType::Unknown;
+    //             }
+    //         }
+    //     }
+    // }
+    fn build_integer_pair<'a>(&mut self, data_to_parse: &'a str) -> Result<TomlPair<'a>, Error> {
+        let value = &data_to_parse[self.value_start()..self.value_end()];
+        let name = &data_to_parse[self.name_start()..self.name_end()];
+        let integer = match u64::from_str_radix(value, 10) {
+            Ok(integer) => integer,
+            Err(error) => {
+                return Err(Error::new(
+                    ErrorKind::InvalidValue(self.line_number),
+                    Some(Box::new(error)),
+                ));
             }
-        }
+        };
+        return Ok(TomlPair::new(name, TomlValue::Integer(integer)));
+    }
+
+    fn build_string_pair<'a>(&mut self, data_to_parse: &'a str) -> Result<TomlPair<'a>, Error> {
+        let value = &data_to_parse[self.value_start()..self.value_end()];
+        let name = &data_to_parse[self.name_start()..self.name_end()];
+        return Ok(TomlPair::new(name, TomlValue::String(value)));
     }
 }
