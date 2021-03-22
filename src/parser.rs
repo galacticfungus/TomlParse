@@ -165,10 +165,8 @@ impl Parser {
         sequence: &mut std::iter::Enumerate<std::str::Chars>,
     ) -> Result<Option<()>, error::Error> {
         loop {
-            // while let Some(index, char) = sequence.next() {} // Process None outside of loop
             match sequence.next() {
                 Some((index, char)) => match char {
-                    // TODO: We can loop internally whenever there is no change in state and only break when state changes
                     ' ' | '\t' => {
                         println!("Whitespace on a new line");
                     }
@@ -178,7 +176,7 @@ impl Parser {
                     }
                     '\r' => {
                         // Next character must be \n and then return pair
-                        if let Some((index, '\n')) = sequence.next() {
+                        if let Some((_, '\n')) = sequence.next() {
                             // No Op continue looking for the start of a name
                             self.line_number += 1;
                         } else {
@@ -250,7 +248,7 @@ impl Parser {
     ) -> Result<(), Error> {
         loop {
             match sequence.next() {
-                Some((index, char)) => match char {
+                Some((_, char)) => match char {
                     '=' => {
                         self.state = ParserState::AfterEquals;
                         return Ok(());

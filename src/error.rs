@@ -1,5 +1,3 @@
-use std::{fmt::Write, num::ParseIntError};
-
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
