@@ -1,8 +1,4 @@
-#[derive(Debug)]
-pub struct Error {
-    kind: ErrorKind,
-    source: Option<Box<dyn std::error::Error>>,
-}
+use super::{Error, ErrorKind};
 
 impl Error {
     pub fn new(error_type: ErrorKind, source: Option<Box<dyn std::error::Error>>) -> Error {
@@ -35,19 +31,7 @@ impl std::error::Error for Error {
         None
     }
 }
-#[derive(Debug)]
-pub enum ErrorKind {
-    /// There are only two valid line endings \n and \r\n
-    InvalidEndOfLine(usize),
-    /// No Value was found on the given line - ie 'fred =' or 'fred'
-    MissingValue(usize),
-    /// Unrecognizable value type ie 'fred = ..! ' this is not a known value type
-    UnknownValueType(usize),
-    /// Invalid Value ie including letters in a number, not ending a string with a "
-    InvalidValue(usize),
-    /// Name contains invalid characters, ie fred\n = 4 or fred \n = 4
-    InvalidName(usize),
-}
+
 
 impl std::fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

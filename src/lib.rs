@@ -2,9 +2,6 @@ mod error;
 mod pair;
 mod parser;
 
-pub use error::Error as Error;
-pub use error::ErrorKind as ErrorKind;
-
 pub struct Parser {
     position: usize,
     state: ParserState,
@@ -28,6 +25,26 @@ pub enum TomlValue<'a> {
 pub struct TomlPair<'a> {
     name: &'a str, // TODO: Two types of names, normal and string
     value: TomlValue<'a>,
+}
+
+#[derive(Debug)]
+pub struct Error {
+    kind: ErrorKind,
+    source: Option<Box<dyn std::error::Error>>,
+}
+
+#[derive(Debug)]
+pub enum ErrorKind {
+    /// There are only two valid line endings \n and \r\n
+    InvalidEndOfLine(usize),
+    /// No Value was found on the given line - ie 'fred =' or 'fred'
+    MissingValue(usize),
+    /// Unrecognizable value type ie 'fred = ..! ' this is not a known value type
+    UnknownValueType(usize),
+    /// Invalid Value ie including letters in a number, not ending a string with a "
+    InvalidValue(usize),
+    /// Name contains invalid characters, ie fred\n = 4 or fred \n = 4
+    InvalidName(usize),
 }
 
 pub enum ParserState {

@@ -1,11 +1,6 @@
 use std::{collections::HashMap, mem::replace};
 
-use error::ErrorKind;
-
-use super::{
-    error::{self, Error},
-    Parser, ParserState, TomlPair, TomlValue,
-};
+use super::{Error, ErrorKind, Parser, ParserState, TomlPair, TomlValue};
 
 impl Parser {
     pub fn new() -> Parser {
@@ -88,7 +83,7 @@ impl Parser {
     pub fn parse<'a>(
         &mut self,
         data_to_parse: &'a str,
-    ) -> Result<HashMap<&'a str, TomlValue<'a>>, error::Error> {
+    ) -> Result<HashMap<&'a str, TomlValue<'a>>, Error> {
         let mut hs = HashMap::new();
         while let Some(pair) = self.read_pair(data_to_parse)? {
             // Add it to the hashmap
@@ -102,16 +97,13 @@ impl Parser {
     pub(crate) fn read_test_pair<'a>(
         &mut self,
         data_to_parse: &'a str,
-    ) -> Result<Option<TomlPair<'a>>, error::Error> {
+    ) -> Result<Option<TomlPair<'a>>, Error> {
         let pair = self.read_pair(data_to_parse)?;
         Ok(pair)
     }
 
     /// Returns the next TOML statement, returns none if there are no more lines
-    fn read_pair<'a>(
-        &mut self,
-        data_to_parse: &'a str,
-    ) -> Result<Option<TomlPair<'a>>, error::Error> {
+    fn read_pair<'a>(&mut self, data_to_parse: &'a str) -> Result<Option<TomlPair<'a>>, Error> {
         // Take the current position and read the next name value pair
         // The name ends after we read an equal ?
         // We treat it as a state machine - ie initial state reading a name, then reading a value
@@ -175,7 +167,7 @@ impl Parser {
     fn process_after_value_state(
         &mut self,
         sequence: &mut std::iter::Enumerate<std::str::Chars>,
-    ) -> Result<Option<()>, error::Error> {
+    ) -> Result<Option<()>, Error> {
         loop {
             match sequence.next() {
                 Some((_, char)) => match char {
@@ -201,7 +193,7 @@ impl Parser {
                             self.state = ParserState::Normal;
                             return Ok(Some(()));
                         } else {
-                            return Err(error::Error::new(
+                            return Err(Error::new(
                                 ErrorKind::InvalidEndOfLine(self.line_number),
                                 None,
                             ));
@@ -226,7 +218,7 @@ impl Parser {
     fn process_normal_state(
         &mut self,
         sequence: &mut std::iter::Enumerate<std::str::Chars>,
-    ) -> Result<Option<()>, error::Error> {
+    ) -> Result<Option<()>, Error> {
         loop {
             match sequence.next() {
                 Some((index, char)) => match char {
@@ -248,7 +240,7 @@ impl Parser {
                             // No Op continue looking for the start of a name
                             self.line_number += 1;
                         } else {
-                            return Err(error::Error::new(
+                            return Err(Error::new(
                                 ErrorKind::InvalidEndOfLine(self.line_number),
                                 None,
                             ));
