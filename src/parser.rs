@@ -11,7 +11,7 @@ impl Parser {
     pub fn new() -> Parser {
         Parser {
             position: 0,
-            state: ParserState::NewLine,
+            state: ParserState::Normal,
             line_number: 1,
             name_start: None,
             name_end: None,
@@ -107,6 +107,7 @@ impl Parser {
         Ok(pair)
     }
 
+    /// Returns the next TOML statement, returns none if there are no more lines
     fn read_pair<'a>(
         &mut self,
         data_to_parse: &'a str,
@@ -134,9 +135,9 @@ impl Parser {
 
         loop {
             match self.state {
-                ParserState::NewLine => {
+                ParserState::Normal => {
                     // Returns none if we are at the end of the buffer otherwise continues
-                    if let None = self.process_new_line_state(&mut sequence)? {
+                    if let None = self.process_normal_state(&mut sequence)? {
                         // After encountering a new line we reached the eof
                         return Ok(None);
                     }
@@ -170,6 +171,7 @@ impl Parser {
             }
         }
     }
+
     fn process_after_value_state(
         &mut self,
         sequence: &mut std::iter::Enumerate<std::str::Chars>,
@@ -180,10 +182,15 @@ impl Parser {
                     ' ' | '\t' => {
                         println!("Whitespace after a value");
                     }
+                    '#' => {
+                        // Comment after value is valid
+                        // self.transition_to(ParserState::Comment)
+                        unimplemented!("Comments are not done");
+                    }
                     '\n' => {
                         // Whitespace - Move to NewLine state
                         self.line_number += 1;
-                        self.state = ParserState::NewLine;
+                        self.state = ParserState::Normal;
                         return Ok(Some(()));
                     }
                     '\r' => {
@@ -191,7 +198,7 @@ impl Parser {
                         if let Some((_, '\n')) = sequence.next() {
                             // No Op continue looking for the start of a name
                             self.line_number += 1;
-                            self.state = ParserState::NewLine;
+                            self.state = ParserState::Normal;
                             return Ok(Some(()));
                         } else {
                             return Err(error::Error::new(
@@ -215,7 +222,8 @@ impl Parser {
     }
 
     // Processes the state after reading a pair, returns Some(()) if a name was found otherwise returns none
-    fn process_new_line_state(
+    // Returns Some(()) if we didn't reach the end of the file
+    fn process_normal_state(
         &mut self,
         sequence: &mut std::iter::Enumerate<std::str::Chars>,
     ) -> Result<Option<()>, error::Error> {
@@ -224,6 +232,11 @@ impl Parser {
                 Some((index, char)) => match char {
                     ' ' | '\t' => {
                         println!("Whitespace on a new line");
+                    }
+                    '#' => {
+                        // Comment, we scan until the end of the line
+                        // self.transition_to(ParserState::CommentLine);
+                        unimplemented!("Support for comments not done");
                     }
                     '\n' => {
                         // Whitespace - no op
@@ -241,11 +254,16 @@ impl Parser {
                             ));
                         }
                     }
+                    '"' => {
+                        unimplemented!("String names are not supported yet");
+                        // self.transition_to(ParserState::ReadingStringName);
+                        // self.state = ParserState::ReadingStringName;
+                        //self.set_name_start(index + self.position + 1);
+                        //return Ok(Some(()));
+                    }
                     _ => {
                         self.state = ParserState::ReadingName;
-
                         self.set_name_start(index + self.position);
-                        //*name_starts = index + self.position;
                         println!("Starting reading name with {} - {:?}", char, char);
                         return Ok(Some(()));
                     }
@@ -279,7 +297,7 @@ impl Parser {
                         return Ok(());
                     }
                     '\n' | '\r' => {
-                        // Not valid a name can't be multiline
+                        // Not valid - a name can't be multiline
                         return Err(Error::new(ErrorKind::InvalidName(self.line_number), None));
                     }
                     _ => {
@@ -287,10 +305,8 @@ impl Parser {
                         // No Op -
                     }
                 },
-
                 None => {
                     // File ended when reading the name - this is an error
-
                     return Err(Error::new(ErrorKind::InvalidName(self.line_number), None));
                 }
             }
@@ -335,10 +351,18 @@ impl Parser {
                     ' ' | '\t' => {
                         // No Op we are waiting for the start of a value
                     }
+                    '#' => {
+                        // Invalid missing a value
+                        return Err(Error::new(ErrorKind::MissingValue(self.line_number), None));
+                    }
                     '"' => {
                         self.state = ParserState::ReadingString;
                         self.set_value_start(index + self.position + 1);
-                        // *value_starts = index + self.position + 1;
+                        return Ok(());
+                    }
+                    't' | 'f' => {
+                        self.state = ParserState::ReadingBoolean;
+                        self.set_value_start(index + self.position);
                         return Ok(());
                     }
                     char if char.is_ascii_digit() == true => {
@@ -393,7 +417,7 @@ impl Parser {
                     }
                     '\n' => {
                         // End of integer
-                        self.state = ParserState::NewLine;
+                        self.state = ParserState::Normal;
                         self.line_number += 1;
                         self.set_value_end(index + self.position);
                         self.position += index;
@@ -402,7 +426,7 @@ impl Parser {
                     '\r' => {
                         // Next character must be \n and then return pair
                         if let Some((index, '\n')) = sequence.next() {
-                            self.state = ParserState::NewLine;
+                            self.state = ParserState::Normal;
                             self.line_number += 1;
                             self.set_value_end(index + self.position + 1);
                             self.position += index + 1;
@@ -424,7 +448,7 @@ impl Parser {
                 None => {
                     // File ended while reading an integer, this is valid the end of the file denotes the end of the integer
                     self.set_value_end(data_to_parse.len());
-                    self.state = ParserState::NewLine;
+                    self.state = ParserState::Normal;
                     return Ok(self.build_integer_pair(data_to_parse)?);
                 }
             }

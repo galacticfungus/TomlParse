@@ -26,7 +26,7 @@ pub struct TomlPair<'a> {
 }
 
 pub enum ParserState {
-    NewLine,        // Parser expects to see a name, whitespace or the end of the file
+    Normal,        // Parser expects to see a name, whitespace or the end of the file
     ReadingName,    // Parser has started reading a name
     BeforeEquals,   // Parser has read a name and now expects an =
     AfterEquals,    // Parser has seen an = and is now expecting a value of some kind
