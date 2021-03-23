@@ -2,6 +2,9 @@ mod error;
 mod pair;
 mod parser;
 
+pub use error::Error as Error;
+pub use error::ErrorKind as ErrorKind;
+
 pub struct Parser {
     position: usize,
     state: ParserState,
@@ -12,18 +15,18 @@ pub struct Parser {
     value_end: Option<usize>,
 }
 
-pub use error::{Error, ErrorKind};
-
 // Currently only supports strings and integers
 #[derive(PartialEq, Debug)]
 pub enum TomlValue<'a> {
-    String(&'a str),
+    String(&'a str), // TODO: Strings are subject to more restrictions than a UTF8 string
     Integer(u64),
+    Float(f64),
 }
 
+// TODO: A TOML name can be a name or a String
 #[derive(PartialEq, Debug)]
 pub struct TomlPair<'a> {
-    name: &'a str,
+    name: &'a str, // TODO: Two types of names, normal and string
     value: TomlValue<'a>,
 }
 
@@ -34,8 +37,8 @@ pub enum ParserState {
     AfterEquals,    // Parser has seen an = and is now expecting a value of some kind
     ReadingString,  // Parser is reading a basic "hello" string
     ReadingInteger, // Parser is reading an integer or potentially a float or date
-    ReadingBoolean,
-    AfterValue,
+    ReadingBoolean, // Parser is reading a boolean
+    AfterValue, // Parser has finished reading a value and is waiting until it sees the next line
 }
 
 #[cfg(test)]
