@@ -12,6 +12,8 @@ pub struct Parser {
     value_end: Option<usize>,
 }
 
+pub use error::{Error, ErrorKind};
+
 // Currently only supports strings and integers
 #[derive(PartialEq, Debug)]
 pub enum TomlValue<'a> {
@@ -26,7 +28,7 @@ pub struct TomlPair<'a> {
 }
 
 pub enum ParserState {
-    Normal,        // Parser expects to see a name, whitespace or the end of the file
+    Normal,         // Parser expects to see a name, whitespace or the end of the file
     ReadingName,    // Parser has started reading a name
     BeforeEquals,   // Parser has read a name and now expects an =
     AfterEquals,    // Parser has seen an = and is now expecting a value of some kind
