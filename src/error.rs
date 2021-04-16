@@ -7,6 +7,10 @@ impl Error {
             source,
         }
     }
+
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
+    }
 }
 
 impl std::fmt::Display for Error {
